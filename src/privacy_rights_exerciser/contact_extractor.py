@@ -8,97 +8,87 @@ EMAIL_PATTERN = re.compile(
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
 
-PRIVACY_KEYWORDS = [
-    "privacy",
-    "personal data",
-    "personal information",
-    "data protection",
-    "delete",
-    "deletion",
-    "erase",
-    "erasure",
-    "remove",
-]
+PRIVACY_REQUEST_KEYWORDS = (
+    "privacy request",
+    "privacy requests",
+    "privacy rights",
+    "your privacy rights",
+    "my privacy rights",
+    "data subject request",
+    "data subject rights",
+    "data request",
+    "data requests",
+    "personal data request",
+    "personal information request",
+    "delete my data",
+    "delete your data",
+    "delete personal data",
+    "delete personal information",
+    "request deletion",
+    "deletion request",
+    "data deletion",
+    "right to erasure",
+    "erasure request",
+    "exercise your rights",
+)
 
 
 def extract_privacy_contacts(html, base_url):
-    """
-    Extract candidate email addresses and links from a privacy page.
-    """
-
     soup = BeautifulSoup(html, "html.parser")
 
-    # Remove things that aren't useful for analyzing the page.
     for element in soup(["script", "style", "noscript"]):
         element.decompose()
 
     text = soup.get_text(" ", strip=True)
 
-    emails = extract_emails(text)
-    links = extract_privacy_links(soup, base_url)
-
     return {
-        "emails": emails,
-        "links": links,
+        "text": text,
+        "emails": extract_emails(text),
+        "links": extract_privacy_links(soup, base_url),
     }
 
 
 def extract_emails(text):
-    """
-    Find email addresses in page text.
-    """
-
     emails = EMAIL_PATTERN.findall(text)
-
-    # Remove duplicates while preserving order.
     return list(dict.fromkeys(emails))
 
 
 def extract_privacy_links(soup, base_url):
-    """
-    Find links that appear relevant to privacy/data requests.
-    """
+    """Extract privacy-related web links, excluding email links."""
 
-    results = []
+    links = []
 
     for link in soup.find_all("a", href=True):
         href = link["href"].strip()
         text = link.get_text(" ", strip=True)
 
-        combined = f"{text} {href}".lower()
+        if href.lower().startswith("mailto:"):
+            continue
 
-        score = 0
+        if EMAIL_PATTERN.search(href) or EMAIL_PATTERN.search(text):
+            continue
 
-        if "privacy" in combined:
-            score += 5
+        url = urljoin(base_url, href)
 
-        if "delete" in combined:
-            score += 5
+        if url.lower().startswith("mailto:"):
+            continue
 
-        if "deletion" in combined:
-            score += 5
+        if EMAIL_PATTERN.search(url):
+            continue
 
-        if "personal data" in combined:
-            score += 3
+        searchable_text = f"{text} {href}".lower()
 
-        if "personal information" in combined:
-            score += 3
+        if not any(
+            keyword in searchable_text
+            for keyword in PRIVACY_REQUEST_KEYWORDS
+        ):
+            continue
 
-        if "data request" in combined:
-            score += 5
+        links.append(
+            {
+                "text": text,
+                "url": url,
+            }
+        )
 
-        if "privacy request" in combined:
-            score += 7
-
-        if score > 0:
-            results.append(
-                {
-                    "text": text,
-                    "url": urljoin(base_url, href),
-                    "score": score,
-                }
-            )
-
-    results.sort(key=lambda item: item["score"], reverse=True)
-
-    return results
+    return links
